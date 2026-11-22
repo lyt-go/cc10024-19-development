@@ -45,6 +45,14 @@ def _auto_dedup_and_check_on_confirm(entry: dict[str, Any]) -> None:
             "result": "pass",
         })
 
+    # 若这条运行记录绑定了违规复检清单，则按清单里可查询的选集执行一轮复检；
+    # 未绑定清单时不擅自动任何来源行，保持原结果。
+    checklist_id = entry.get("复检清单id")
+    if checklist_id:
+        from app.services import violation_recheck
+        violation_recheck.execute_for_run(
+            int(entry["id"]), int(checklist_id), mode="current")
+
 import hashlib
 register_hook("run_history", "确认完成", _auto_dedup_and_check_on_confirm)
 
@@ -58,6 +66,27 @@ class RunHistoryService(BaseModuleService):
     STATUS_ORDER = ["运行中", "已完成", "部分成功", "已失败"]
     ACTION_RULES = {"确认完成": "已完成", "标记部分完成": "部分成功", "标记失败": "已失败"}
     NEGATIVE_ACTIONS = []
+
+    def create_entry(self, values: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]:
+        """登记运行记录时可绑定一张违规复检清单，确认完成时只复检清单选集。"""
+        checklist = None
+        checklist_id = values.get("复检清单id")
+        if checklist_id not in (None, ""):
+            # 先校验再落库，避免校验失败时留下半条记录。
+            try:
+                checklist_id = int(checklist_id)
+            except (TypeError, ValueError):
+                return None, ["复检清单id"]
+            from app.services import violation_recheck
+            try:
+                checklist = violation_recheck.get_checklist(checklist_id)
+            except ValueError:
+                return None, ["复检清单id"]
+        entry, missing = super().create_entry(values)
+        if entry is not None and checklist is not None:
+            entry["复检清单id"] = checklist_id
+            entry["复检清单"] = checklist["清单编号"]
+        return entry, missing
 
     def get_recent_runs(self, limit: int = 20) -> list[dict[str, Any]]:
         """获取最近的运行记录，优先从JSONL文件读取完整历史。"""
@@ -74,6 +103,8 @@ class RunHistoryService(BaseModuleService):
                 "action": r.get("status", ""),
                 "timestamp": r.get("updated_at", ""),
                 "abnormal": r.get("abnormal", False),
+                "checklist": r.get("复检清单", ""),
+                "round": r.get("复检轮次", ""),
             } for r in memory_runs
         ]
         return combined[-limit:]
@@ -90,4 +121,8 @@ class RunHistoryService(BaseModuleService):
         # 关联的schema校验报告
         schema_reports = persist.read_jsonl("reports", "schema_check_report.jsonl")
         base["triggered_schema"] = len([r for r in schema_reports if r.get("trigger") == "run_history_confirm"])
+        # 关联的违规复检轮次
+        recheck_rounds = persist.read_jsonl("reports", "recheck_rounds.jsonl")
+        base["recheck_rounds"] = len(recheck_rounds)
+        base["recheck_linked_runs"] = len({r.get("运行记录id") for r in recheck_rounds if r.get("运行记录id")})
         return base

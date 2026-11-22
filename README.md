@@ -67,7 +67,30 @@ npm run dev
 | 导出通道 | `export_channel` | 导出配置 | 通道编号、输出格式、目标路径 |
 | 运行历史 | `run_history` | 运行记录 | 记录编号、关联计划、开始时间 |
 | Schema校验 | `schema_check` | Schema规则 | 规则编号、目标数据、字段名 |
+| 违规复检 | `violation_recheck` | 复检清单 | 违规身份、来源、行标识、原值、规则快照、字典版本 |
 | 内容缓存 | `content_cache` | 缓存配置 | 配置编号、缓存类型、过期策略 |
+
+领域：数据工程
+子方向：数据采集、爬虫与RPA
+
+## 违规复检
+
+首轮 Schema 校验失败后，逐字段记录违规明细：来源、行标识、原值、原违规规则快照、
+首轮字典版本和稳定违规身份 `violation_id`。复检清单只保存被选中的违规身份，筛选、
+排序、翻页、提交都以身份为准，不会顺带扩大到未选站点。
+
+- 接口前缀：`/api/recheck`
+  - `GET /state`、`GET /violations`、`GET /sources`
+  - `GET|POST /checklists`、`GET /checklists/{id}/items`、`POST /checklists/{id}/submit`
+  - `GET /rounds`、`POST /rounds/{id}/replay`
+  - `GET|POST /dictionary`
+- 前端入口：`/violation_recheck`（`frontend/src/views/ViolationRecheck.vue`）。
+- 复检轮次保存被选原值、规则快照和实际修复字典版本；重放只读这些快照，
+  之后再换字典也不会改变归一值和行数。
+- 运行记录登记时可带 `复检清单id`，`确认完成` 时只对清单选集执行字段归一化与
+  Schema 复检，结果回写为该运行记录下的复检轮次；未入清单的来源行保持原结果。
+- 同一原码在首轮字典和新字典下被解释成不同合法值时，清单和轮次都会显式标出
+  `口径冲突`，便于区分“按首轮口径复现”和“按本次业务口径整改”。
 
 ## 约定
 
@@ -76,6 +99,3 @@ npm run dev
   `frontend/src/domain/<模块>.ts`，用于承载真实业务差异并维持36题位容量。
 - 列表接口统一返回 `{ items, total, page, size }`，动作接口统一返回 `{ ok, message }`。
 - 状态流转只允许在 `app/services` 里改，路由层不做业务判断。
-
-领域：数据工程
-子方向：数据采集、爬虫与RPA

@@ -8,6 +8,17 @@ from app.services.base import BaseModuleService
 from app import persistence as persist
 
 
+def normalize_by_mapping(raw: Any, mapping: dict[str, str]) -> tuple[str, bool, str]:
+    """按给定字典映射归一单个原码。
+
+    返回 (归一值, 是否命中, 原码)。未命中时保留原值，便于复检继续按原口径判定。
+    """
+    text = "" if raw is None else str(raw)
+    if text in mapping:
+        return str(mapping[text]), True, text
+    return text, False, text
+
+
 class FieldNormalizeService(BaseModuleService):
     MODULE = "field_normalize"
     ENTITY = "归一规则"
